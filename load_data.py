@@ -75,6 +75,6 @@ def create_patch_context(task, patch_text, install_loc):
 
 async def run_verifiers(task, patch_text, install_loc):
     ctx = create_patch_context(task, patch_text, install_loc)
-    res = await ASTCheckVerifier().verify(ctx)
+    res = await ASTCheckVerifier().safe_verify(ctx)
     return res
     
