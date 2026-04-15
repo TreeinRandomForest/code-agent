@@ -1,0 +1,116 @@
+---
+# MinIO credentials secret.
+#
+# IMPORTANT: Replace <YOUR_MINIO_USER> and <YOUR_MINIO_PASSWORD> with
+# your own values before applying.
+#
+# Alternatively, create the secret via CLI:
+#   oc create secret generic minio-credentials \
+#     --from-literal=MINIO_ROOT_USER=<YOUR_MINIO_USER> \
+#     --from-literal=MINIO_ROOT_PASSWORD=<YOUR_MINIO_PASSWORD> \
+#     --from-literal=MINIO_ENDPOINT_URL=http://minio:9000
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: <YOUR_MINIO_USER>
+  MINIO_ROOT_PASSWORD: <YOUR_MINIO_PASSWORD>
+  MINIO_ENDPOINT_URL: http://minio:9000
+
+---
+# Persistent storage for MinIO data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+# MinIO single-node deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    type: Recreate  # RWO PVC can only be mounted by one pod
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:latest
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          envFrom:
+            - secretRef:
+                name: minio-credentials
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+
+---
+# MinIO API service (S3-compatible endpoint).
+# Ray head pods connect to http://minio:9000
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
